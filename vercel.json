@@ -1,0 +1,5 @@
+{
+  "buildCommand": "npx prisma migrate deploy",
+  "outputDirectory": "public",
+  "rewrites": [{ "source": "/(.*)", "destination": "/api/index" }]
+}

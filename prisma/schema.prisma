@@ -1,0 +1,284 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "rhel-openssl-3.0.x"]
+}
+
+enum ReportHighlightCategory {
+  ACHIEVEMENT
+  BLOCKER
+}
+
+model Role {
+  id    Int    @id @default(autoincrement())
+  name  String @unique @db.VarChar(50)
+  users User[]
+
+  @@map("roles")
+}
+
+model UserStatus {
+  id    Int    @id @default(autoincrement())
+  name  String @unique @db.VarChar(50)
+  users User[]
+
+  @@map("user_statuses")
+}
+
+model User {
+  id                 String   @id @default(uuid()) @db.Uuid
+  name               String   @db.VarChar(100)
+  email              String   @unique @db.VarChar(255)
+  passwordHash       String   @map("password_hash")
+  mustChangePassword Boolean  @default(false) @map("must_change_password")
+  roleId             Int      @map("role_id")
+  userStatusId       Int?     @map("user_status_id")
+  jobTitle           String?  @map("job_title") @db.VarChar(100)
+  isActive           Boolean  @default(true) @map("is_active")
+  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  role          Role           @relation(fields: [roleId], references: [id], onDelete: Restrict)
+  userStatus    UserStatus?    @relation(fields: [userStatusId], references: [id], onDelete: Restrict)
+  userProjects  UserProject[]
+  teamMembers   TeamMember[]
+  reports       Report[]
+  refreshTokens RefreshToken[]
+
+  @@map("users")
+}
+
+model Team {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String   @unique @db.VarChar(150)
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  teamMembers  TeamMember[]
+  teamProjects TeamProject[]
+
+  @@map("teams")
+}
+
+model TeamMember {
+  id     String @id @default(uuid()) @db.Uuid
+  teamId String @map("team_id") @db.Uuid
+  userId String @map("user_id") @db.Uuid
+
+  team Team @relation(fields: [teamId], references: [id], onDelete: Restrict)
+  user User @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@unique([teamId, userId])
+  @@map("team_members")
+}
+
+model TeamProject {
+  id        String @id @default(uuid()) @db.Uuid
+  teamId    String @map("team_id") @db.Uuid
+  projectId String @map("project_id") @db.Uuid
+
+  team    Team    @relation(fields: [teamId], references: [id], onDelete: Restrict)
+  project Project @relation(fields: [projectId], references: [id], onDelete: Restrict)
+
+  @@unique([teamId, projectId])
+  @@map("team_projects")
+}
+
+model RefreshToken {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  tokenHash String    @unique @map("token_hash")
+  expiresAt DateTime  @map("expires_at")
+  revokedAt DateTime? @map("revoked_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("refresh_tokens")
+}
+
+model Project {
+  id              String   @id @default(uuid()) @db.Uuid
+  name            String   @unique @db.VarChar(150)
+  description     String?
+  projectStatusId Int      @map("project_status_id")
+  isActive        Boolean  @default(true) @map("is_active")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  projectStatus ProjectStatus @relation(fields: [projectStatusId], references: [id], onDelete: Restrict)
+  userProjects  UserProject[]
+  teamProjects  TeamProject[]
+  reports       Report[]
+
+  @@map("projects")
+}
+
+model ProjectStatus {
+  id       Int       @id @default(autoincrement())
+  name     String    @unique @db.VarChar(50)
+  projects Project[]
+
+  @@map("project_statuses")
+}
+
+model UserProject {
+  id        String @id @default(uuid()) @db.Uuid
+  userId    String @map("user_id") @db.Uuid
+  projectId String @map("project_id") @db.Uuid
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Restrict)
+  project Project @relation(fields: [projectId], references: [id], onDelete: Restrict)
+
+  @@unique([userId, projectId])
+  @@map("user_projects")
+}
+
+model Report {
+  id             String   @id @default(uuid()) @db.Uuid
+  userId         String   @map("user_id") @db.Uuid
+  projectId      String   @map("project_id") @db.Uuid
+  reportStatusId Int      @map("report_status_id")
+  comment        String?
+  notes          String?
+  startDate      DateTime @map("start_date") @db.Date
+  endDate        DateTime @map("end_date") @db.Date
+  links          String?
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  user                User                 @relation(fields: [userId], references: [id], onDelete: Restrict)
+  project             Project              @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  reportStatus        ReportStatus         @relation(fields: [reportStatusId], references: [id], onDelete: Restrict)
+  tasks               Task[]
+  reportNextWeekTasks ReportNextWeekTask[]
+  reportHighlights    ReportHighlight[]
+  reportHours         ReportHours[]
+  reportHistory       ReportHistory[]
+
+  @@map("reports")
+}
+
+model ReportStatus {
+  id             Int             @id @default(autoincrement())
+  name           String          @unique @db.VarChar(50)
+  reports        Report[]
+  reportHistory  ReportHistory[]
+
+  @@map("report_statuses")
+}
+
+// Snapshot of a report taken right before it is edited and resubmitted following
+// a "Needs Correction" review, so the version a manager's comment was made
+// against remains visible after the user overwrites the report's live content.
+model ReportHistory {
+  id             String   @id @default(uuid()) @db.Uuid
+  reportId       String   @map("report_id") @db.Uuid
+  versionNumber  Int      @map("version_number")
+  reportStatusId Int      @map("report_status_id")
+  comment        String?
+  notes          String?
+  startDate      DateTime @map("start_date") @db.Date
+  endDate        DateTime @map("end_date") @db.Date
+  links          String?
+  snapshot       Json
+  submittedAt    DateTime @map("submitted_at")
+  archivedAt     DateTime @default(now()) @map("archived_at")
+
+  report       Report       @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  reportStatus ReportStatus @relation(fields: [reportStatusId], references: [id], onDelete: Restrict)
+
+  @@unique([reportId, versionNumber])
+  @@map("report_history")
+}
+
+model Task {
+  id             String  @id @default(uuid()) @db.Uuid
+  reportId       String  @map("report_id") @db.Uuid
+  name           String  @db.VarChar(200)
+  priorityTypeId Int     @map("priority_type_id")
+  taskStatusId   Int     @map("task_status_id")
+  planned        Int?
+  actual         Int?
+  plannedHour    Int?    @map("planned_hour")
+  actualHour     Int?    @map("actual_hour")
+  deliverable    String?
+
+  report       Report       @relation(fields: [reportId], references: [id], onDelete: Restrict)
+  priorityType PriorityType @relation(fields: [priorityTypeId], references: [id], onDelete: Restrict)
+  taskStatus   TaskStatus   @relation(fields: [taskStatusId], references: [id], onDelete: Restrict)
+
+  @@map("tasks")
+}
+
+model PriorityType {
+  id    Int    @id @default(autoincrement())
+  name  String @unique @db.VarChar(50)
+  tasks Task[]
+
+  @@map("priority_types")
+}
+
+model TaskStatus {
+  id    Int    @id @default(autoincrement())
+  name  String @unique @db.VarChar(50)
+  tasks Task[]
+
+  @@map("task_statuses")
+}
+
+model ReportHighlightType {
+  id               Int                     @id @default(autoincrement())
+  name             String                  @unique @db.VarChar(50)
+  category         ReportHighlightCategory
+  reportHighlights ReportHighlight[]
+
+  @@map("report_highlight_types")
+}
+
+model ReportHighlight {
+  id                    String  @id @default(uuid()) @db.Uuid
+  reportId              String  @map("report_id") @db.Uuid
+  reportHighlightTypeId Int     @map("report_highlight_type_id")
+  isKey                 Boolean @default(false) @map("is_key")
+  description           String?
+
+  report              Report              @relation(fields: [reportId], references: [id], onDelete: Restrict)
+  reportHighlightType ReportHighlightType @relation(fields: [reportHighlightTypeId], references: [id], onDelete: Restrict)
+
+  @@map("report_highlights")
+}
+
+model ReportNextWeekTask {
+  id          String  @id @default(uuid()) @db.Uuid
+  reportId    String  @map("report_id") @db.Uuid
+  description String?
+
+  report Report @relation(fields: [reportId], references: [id], onDelete: Restrict)
+
+  @@map("report_next_week_tasks")
+}
+
+model ReportHours {
+  id               String  @id @default(uuid()) @db.Uuid
+  reportId         String  @map("report_id") @db.Uuid
+  reportHourTypeId Int     @map("report_hour_type_id")
+  hours            Decimal @db.Decimal(6, 2)
+
+  report         Report         @relation(fields: [reportId], references: [id], onDelete: Restrict)
+  reportHourType ReportHourType @relation(fields: [reportHourTypeId], references: [id], onDelete: Restrict)
+
+  @@map("report_hours")
+}
+
+model ReportHourType {
+  id          Int           @id @default(autoincrement())
+  name        String        @unique @db.VarChar(50)
+  reportHours ReportHours[]
+
+  @@map("report_hour_types")
+}
